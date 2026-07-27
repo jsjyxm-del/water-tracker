@@ -691,12 +691,12 @@ function setSyncBadge(text, color) {
 }
 
 async function pullFromCloud() {
-  if (!cloudOK) return;
+  if (!cloudOK) { setSyncBadge('⚠️ 离线', '#f5a623'); return; }
   try {
     const resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?select=*&order=recorded_at.asc`, { headers: httpHeaders() });
-    if (!resp.ok) { console.warn('Cloud pull status:', resp.status); return; }
+    if (!resp.ok) { console.warn('Cloud pull status:', resp.status); setSyncBadge('⚠️ 离线', '#f5a623'); return; }
     const records = await resp.json();
-    if (!records || records.length === 0) return;
+    if (!records || records.length === 0) { setSyncBadge('☁️ 已同步', '#5a9a6f'); return; }
 
     const data = getData();
     let changed = false;
@@ -738,17 +738,18 @@ function deleteFromCloud(dateKey, type, time) {
 }
 
 // Test cloud connectivity on init
-(async function testCloud() {
+async function testCloud() {
   try {
     const resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?limit=1`, { headers: httpHeaders() });
-    cloudOK = resp.ok || resp.status === 200 || resp.status === 406;
+    cloudOK = resp.ok || resp.status === 200;
     if (cloudOK) console.log('Cloud sync: connected');
     else console.warn('Cloud sync: unavailable (status ' + resp.status + ')');
   } catch(e) {
     cloudOK = false;
-    console.warn('Cloud sync: unreachable');
+    console.warn('Cloud sync: unreachable, reason:', e.message);
   }
-})();
+  return cloudOK;
+}
 
 // ===== Data Layer =====
 const STORAGE_KEY = 'water_tracker_data';
@@ -1414,10 +1415,16 @@ document.getElementById('goalDisplay').textContent = getGoal();
 document.getElementById('legendGoal').textContent = `达标(≥${getGoal()}ml)`;
 
 // Pull from cloud first, then render
-setSyncBadge('☁️ 同步中...', '#7a9cc6');
-pullFromCloud().then(() => {
+(async function initCloud() {
+  setSyncBadge('☁️ 同步中...', '#7a9cc6');
+  const ok = await testCloud();
+  if (ok) {
+    await pullFromCloud();
+  } else {
+    setSyncBadge('⚠️ 离线', '#f5a623');
+  }
   renderAll();
-});
+})();
 
 // Close day detail on overlay click
 document.getElementById('dayDetailOverlay').addEventListener('click', function(e) {
