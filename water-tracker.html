@@ -488,6 +488,7 @@
 <div class="header">
   <h1>💧 每日喝水打卡</h1>
   <div class="date" id="todayDate"></div>
+  <div style="margin-top:4px; font-size:12px;" id="syncBadge"></div>
 </div>
 
 <div class="container">
@@ -666,6 +667,89 @@
 </div>
 
 <script>
+// ===== Supabase Cloud Sync =====
+const SUPABASE_URL = 'https://dmzqezdsxtrdnovptcs1.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_O1WxAOtdfn_2Rbhxs3WL9Q_pKgJGtxX';
+let cloudOK = false;
+
+function httpHeaders() {
+  return {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+function makeUid(dk, t, ts) { return `${dk}-${t}-${ts}`; }
+
+function setSyncBadge(text, color) {
+  const el = document.getElementById('syncBadge');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = color || '#7a9cc6';
+  el.style.display = '';
+}
+
+async function pullFromCloud() {
+  if (!cloudOK) return;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?select=*&order=recorded_at.asc`, { headers: httpHeaders() });
+    if (!resp.ok) { console.warn('Cloud pull status:', resp.status); return; }
+    const records = await resp.json();
+    if (!records || records.length === 0) return;
+
+    const data = getData();
+    let changed = false;
+    for (const r of records) {
+      if (!data[r.record_date]) { data[r.record_date] = { water: [], urine: [] }; changed = true; }
+      const list = r.type === 'water' ? data[r.record_date].water : data[r.record_date].urine;
+      const exists = list.some(x => x.time === r.recorded_at);
+      if (!exists) {
+        if (r.type === 'water') list.push({ time: r.recorded_at, ml: r.ml });
+        else list.push({ time: r.recorded_at });
+        changed = true;
+      }
+    }
+    if (changed) { saveData(data); setSyncBadge('☁️ 已同步', '#5a9a6f'); }
+  } catch(e) { console.error('Cloud pull error:', e); setSyncBadge('⚠️ 离线', '#f5a623'); }
+}
+
+function pushToCloud(dateKey, type, time, ml) {
+  if (!cloudOK) return;
+  const uid = makeUid(dateKey, type, time);
+  const body = { uid, record_date: dateKey, type, ml: type === 'water' ? ml : null, recorded_at: time };
+  fetch(`${SUPABASE_URL}/rest/v1/water_records`, {
+    method: 'POST',
+    headers: { ...httpHeaders(), 'Prefer': 'resolution=merge-duplicates' },
+    body: JSON.stringify(body)
+  }).then(r => {
+    if (!r.ok) console.warn('Cloud push status:', r.status, 'for', uid);
+  }).catch(e => console.error('Cloud push error:', e));
+}
+
+function deleteFromCloud(dateKey, type, time) {
+  if (!cloudOK) return;
+  const uid = makeUid(dateKey, type, time);
+  fetch(`${SUPABASE_URL}/rest/v1/water_records?uid=eq.${encodeURIComponent(uid)}`, {
+    method: 'DELETE',
+    headers: httpHeaders()
+  }).then(r => { if (!r.ok) console.warn('Cloud delete status:', r.status); })
+    .catch(e => console.error('Cloud delete error:', e));
+}
+
+// Test cloud connectivity on init
+(async function testCloud() {
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?limit=1`, { headers: httpHeaders() });
+    cloudOK = resp.ok || resp.status === 200 || resp.status === 406;
+    if (cloudOK) console.log('Cloud sync: connected');
+    else console.warn('Cloud sync: unavailable (status ' + resp.status + ')');
+  } catch(e) {
+    cloudOK = false;
+    console.warn('Cloud sync: unreachable');
+  }
+})();
+
 // ===== Data Layer =====
 const STORAGE_KEY = 'water_tracker_data';
 const GOAL_DEFAULT = 2000;
@@ -752,8 +836,10 @@ function ensureDate(dateKey) {
 
 function addWaterForDate(dateKey, ml) {
   const data = ensureDate(dateKey);
-  data[dateKey].water.push({ time: Date.now(), ml: ml });
+  const now = Date.now();
+  data[dateKey].water.push({ time: now, ml: ml });
   saveData(data);
+  pushToCloud(dateKey, 'water', now, ml);
   renderAll();
   showDayDetail(dateKey);
   showToast(`💧 ${dateKey} 已记录 ${ml}ml 饮水`);
@@ -761,8 +847,10 @@ function addWaterForDate(dateKey, ml) {
 
 function addUrineForDate(dateKey) {
   const data = ensureDate(dateKey);
-  data[dateKey].urine.push({ time: Date.now() });
+  const now = Date.now();
+  data[dateKey].urine.push({ time: now });
   saveData(data);
+  pushToCloud(dateKey, 'urine', now, null);
   renderAll();
   showDayDetail(dateKey);
   showToast(`🚽 ${dateKey} 已记录一次排尿`);
@@ -777,9 +865,12 @@ function addCustomWaterForDate(dateKey) {
 
 function deleteWaterForDate(dateKey, idx) {
   const data = ensureDate(dateKey);
-  if (data[dateKey].water[idx] !== undefined) {
+  const rec = data[dateKey].water[idx];
+  if (rec !== undefined) {
+    const ts = rec.time;
     data[dateKey].water.splice(idx, 1);
     saveData(data);
+    deleteFromCloud(dateKey, 'water', ts);
     renderAll();
     showDayDetail(dateKey);
     showToast('已删除一条喝水记录');
@@ -788,9 +879,12 @@ function deleteWaterForDate(dateKey, idx) {
 
 function deleteUrineForDate(dateKey, idx) {
   const data = ensureDate(dateKey);
-  if (data[dateKey].urine[idx] !== undefined) {
+  const rec = data[dateKey].urine[idx];
+  if (rec !== undefined) {
+    const ts = rec.time;
     data[dateKey].urine.splice(idx, 1);
     saveData(data);
+    deleteFromCloud(dateKey, 'urine', ts);
     renderAll();
     showDayDetail(dateKey);
     showToast('已删除一条排尿记录');
@@ -813,8 +907,10 @@ function showToast(msg) {
 // ===== Water Actions =====
 function addWater(ml) {
   const ctx = openToday();
-  ctx.today.water.push({ time: Date.now(), ml: ml });
+  const now = Date.now();
+  ctx.today.water.push({ time: now, ml: ml });
   commit(ctx);
+  pushToCloud(getTodayKey(), 'water', now, ml);
   renderAll();
   showToast(`💧 已记录 ${ml}ml 饮水`);
 }
@@ -832,8 +928,11 @@ function addCustomWater() {
 
 function deleteWater(idx) {
   const ctx = openToday();
+  const rec = ctx.today.water[idx];
+  const ts = rec ? rec.time : 0;
   ctx.today.water.splice(idx, 1);
   commit(ctx);
+  if (ts) deleteFromCloud(getTodayKey(), 'water', ts);
   renderAll();
   showToast('已删除一条喝水记录');
 }
@@ -841,16 +940,21 @@ function deleteWater(idx) {
 // ===== Urine Actions =====
 function addUrine() {
   const ctx = openToday();
-  ctx.today.urine.push({ time: Date.now() });
+  const now = Date.now();
+  ctx.today.urine.push({ time: now });
   commit(ctx);
+  pushToCloud(getTodayKey(), 'urine', now, null);
   renderAll();
   showToast('🚽 已记录一次排尿');
 }
 
 function deleteUrine(idx) {
   const ctx = openToday();
+  const rec = ctx.today.urine[idx];
+  const ts = rec ? rec.time : 0;
   ctx.today.urine.splice(idx, 1);
   commit(ctx);
+  if (ts) deleteFromCloud(getTodayKey(), 'urine', ts);
   renderAll();
   showToast('已删除一条排尿记录');
 }
@@ -864,9 +968,20 @@ function hideClearDialog() {
 }
 function clearToday() {
   const ctx = openToday();
+  const key = getTodayKey();
+  const wUids = ctx.today.water.map(w => makeUid(key, 'water', w.time));
+  const uUids = ctx.today.urine.map(u => makeUid(key, 'urine', u.time));
   ctx.today.water = [];
   ctx.today.urine = [];
   commit(ctx);
+  // Fire-and-forget cloud delete for all today's records
+  if (cloudOK) {
+    [...wUids, ...uUids].forEach(uid => {
+      fetch(`${SUPABASE_URL}/rest/v1/water_records?uid=eq.${encodeURIComponent(uid)}`, {
+        method: 'DELETE', headers: httpHeaders()
+      }).catch(() => {});
+    });
+  }
   hideClearDialog();
   renderAll();
   showToast('今日记录已清空');
@@ -1295,10 +1410,14 @@ function renderAll() {
 initDate();
 initCalendar();
 initYearView();
-// Init goal display
 document.getElementById('goalDisplay').textContent = getGoal();
 document.getElementById('legendGoal').textContent = `达标(≥${getGoal()}ml)`;
-renderAll();
+
+// Pull from cloud first, then render
+setSyncBadge('☁️ 同步中...', '#7a9cc6');
+pullFromCloud().then(() => {
+  renderAll();
+});
 
 // Close day detail on overlay click
 document.getElementById('dayDetailOverlay').addEventListener('click', function(e) {
