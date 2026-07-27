@@ -615,6 +615,18 @@
           <div class="stat-value" id="msUrineTotal">0</div>
           <div class="stat-label">总排尿次数</div>
         </div>
+        <div class="month-stat" style="background:#eaf4ed;">
+          <div class="stat-value" id="msFullTarget" style="color:#5a9a6f;">0</div>
+          <div class="stat-label" style="color:#5a9a6f;">✅ 已达标</div>
+        </div>
+        <div class="month-stat" style="background:#fef5e7;">
+          <div class="stat-value" id="msHasData" style="color:#c8993a;">0</div>
+          <div class="stat-label" style="color:#c8993a;">⚠️ 未达标</div>
+        </div>
+        <div class="month-stat" style="background:#f2f2f0;">
+          <div class="stat-value" id="msNoData" style="color:#aaa;">0</div>
+          <div class="stat-label" style="color:#aaa;">— 未打卡</div>
+        </div>
       </div>
     </div>
   </div>
@@ -950,6 +962,9 @@ function renderCalendar() {
   let monthWaterDays = 0;
   let monthMlTotal = 0;
   let monthUrineTotal = 0;
+  let monthFullTarget = 0;  // 已达标
+  let monthHasData = 0;     // 未达标
+  let monthNoData = 0;      // 未打卡
 
   for (let d = 1; d <= totalDays; d++) {
     const key = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -961,6 +976,11 @@ function renderCalendar() {
     if (wCount > 0) monthWaterDays++;
     monthMlTotal += mlTotal;
     monthUrineTotal += uCount;
+
+    // Count three states
+    if (mlTotal >= getGoal()) monthFullTarget++;
+    else if (wCount > 0 || uCount > 0) monthHasData++;
+    else monthNoData++;
 
     let cls = 'cal-day';
     if (key === todayKeyStr) cls += ' today';
@@ -981,7 +1001,10 @@ function renderCalendar() {
   document.getElementById('msWaterDays').textContent = monthWaterDays;
   document.getElementById('msMlTotal').textContent = monthMlTotal;
   document.getElementById('msUrineTotal').textContent = monthUrineTotal;
-  document.getElementById('monthSummary').style.display = 'flex';
+  document.getElementById('msFullTarget').textContent = monthFullTarget;
+  document.getElementById('msHasData').textContent = monthHasData;
+  document.getElementById('msNoData').textContent = monthNoData;
+  document.getElementById('monthSummary').style.display = 'grid';
 }
 
 function calPrevMonth() {
