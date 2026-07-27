@@ -742,6 +742,61 @@ function commit(ctx) {
   saveData(ctx._data);
 }
 
+// ===== Date-Specific Data Ops =====
+function ensureDate(dateKey) {
+  const data = getData();
+  if (!data[dateKey]) data[dateKey] = { water: [], urine: [] };
+  saveData(data);
+  return data;
+}
+
+function addWaterForDate(dateKey, ml) {
+  const data = ensureDate(dateKey);
+  data[dateKey].water.push({ time: Date.now(), ml: ml });
+  saveData(data);
+  renderAll();
+  showDayDetail(dateKey);
+  showToast(`💧 ${dateKey} 已记录 ${ml}ml 饮水`);
+}
+
+function addUrineForDate(dateKey) {
+  const data = ensureDate(dateKey);
+  data[dateKey].urine.push({ time: Date.now() });
+  saveData(data);
+  renderAll();
+  showDayDetail(dateKey);
+  showToast(`🚽 ${dateKey} 已记录一次排尿`);
+}
+
+function addCustomWaterForDate(dateKey) {
+  const input = document.getElementById('detailCustomMl');
+  const ml = parseInt(input.value);
+  if (!ml || ml <= 0) { showToast('请输入有效的毫升数'); return; }
+  addWaterForDate(dateKey, ml);
+}
+
+function deleteWaterForDate(dateKey, idx) {
+  const data = ensureDate(dateKey);
+  if (data[dateKey].water[idx] !== undefined) {
+    data[dateKey].water.splice(idx, 1);
+    saveData(data);
+    renderAll();
+    showDayDetail(dateKey);
+    showToast('已删除一条喝水记录');
+  }
+}
+
+function deleteUrineForDate(dateKey, idx) {
+  const data = ensureDate(dateKey);
+  if (data[dateKey].urine[idx] !== undefined) {
+    data[dateKey].urine.splice(idx, 1);
+    saveData(data);
+    renderAll();
+    showDayDetail(dateKey);
+    showToast('已删除一条排尿记录');
+  }
+}
+
 function formatTime(ts) {
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
@@ -1032,19 +1087,28 @@ function showDayDetail(dateKey) {
     ...day.urine.map(u => ({ ...u, type: 'urine' }))
   ].sort((a, b) => b.time - a.time);
 
-  if (allRecords.length === 0) {
+    if (allRecords.length === 0) {
     recordsHtml = '<div class="empty">当天没有记录</div>';
   } else {
-    recordsHtml = allRecords.map(r => {
+    recordsHtml = allRecords.map((r, i) => {
+      const origIdx = r.type === 'water'
+        ? day.water.indexOf(day.water.find(w => w.time === r.time && w.ml === r.ml))
+        : day.urine.indexOf(day.urine.find(u => u.time === r.time));
       if (r.type === 'water') {
-        return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f4fa;">
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f4fa;">
           <span>💧 喝水 ${r.ml}ml</span>
-          <span style="color:#7a9cc6;font-size:13px;">${formatTime(r.time)}</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#7a9cc6;font-size:13px;">${formatTime(r.time)}</span>
+            <button onclick="deleteWaterForDate('${dateKey}',${origIdx})" style="background:#fff0f0;color:#e74c3c;border:1px solid #ffd5d5;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer;">删除</button>
+          </span>
         </div>`;
       } else {
-        return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f4fa;">
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f4fa;">
           <span>🚽 排尿</span>
-          <span style="color:#7a9cc6;font-size:13px;">${formatTime(r.time)}</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#7a9cc6;font-size:13px;">${formatTime(r.time)}</span>
+            <button onclick="deleteUrineForDate('${dateKey}',${origIdx})" style="background:#fff0f0;color:#e74c3c;border:1px solid #ffd5d5;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer;">删除</button>
+          </span>
         </div>`;
       }
     }).join('');
@@ -1069,6 +1133,21 @@ function showDayDetail(dateKey) {
     <div class="detail-stat">
       <span class="ds-label">🚽 排尿次数</span>
       <span class="ds-value">${day.urine.length} 次</span>
+    </div>
+    <div style="margin-top:14px; padding-top:10px; border-top:1px solid #eee;">
+      <div style="font-size:14px; font-weight:600; color:#7a9cc6; margin-bottom:8px;">✏️ 添加记录</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+        <button onclick="addWaterForDate('${dateKey}',150)" style="background:#e8f1ff;color:#2575fc;border:none;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">150ml</button>
+        <button onclick="addWaterForDate('${dateKey}',200)" style="background:#e8f1ff;color:#2575fc;border:none;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">200ml</button>
+        <button onclick="addWaterForDate('${dateKey}',250)" style="background:#e8f1ff;color:#2575fc;border:none;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">250ml</button>
+        <button onclick="addWaterForDate('${dateKey}',300)" style="background:#e8f1ff;color:#2575fc;border:none;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">300ml</button>
+        <button onclick="addWaterForDate('${dateKey}',500)" style="background:#e8f1ff;color:#2575fc;border:none;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">500ml</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input type="number" id="detailCustomMl" placeholder="自定义ml" min="1" style="flex:1;border:2px solid #e0e8f0;border-radius:8px;padding:6px 10px;font-size:13px;outline:none;" onkeydown="if(event.key==='Enter')addCustomWaterForDate('${dateKey}')">
+        <button onclick="addCustomWaterForDate('${dateKey}')" style="background:#2575fc;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">添加</button>
+      </div>
+      <button onclick="addUrineForDate('${dateKey}')" style="width:100%;background:#fff3e0;color:#f5a623;border:2px solid #ffe0b2;border-radius:10px;padding:8px;font-size:14px;font-weight:600;cursor:pointer;">🚽 记录一次排尿</button>
     </div>
     <div style="margin-top:14px; padding-top:10px; border-top:1px solid #eee;">
       <div style="font-size:14px; font-weight:600; color:#7a9cc6; margin-bottom:8px;">⏱ 详细记录</div>
