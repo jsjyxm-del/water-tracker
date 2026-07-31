@@ -481,13 +481,152 @@
   }
   .legend-item { display: flex; align-items: center; gap: 4px; }
   .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+  /* ===== Login Page ===== */
+  .login-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(135deg, #4a9eff, #2575fc);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .login-overlay.show { display: flex; }
+  .login-card {
+    background: #fff;
+    border-radius: 24px;
+    padding: 36px 28px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .login-card .login-icon {
+    text-align: center;
+    font-size: 48px;
+    margin-bottom: 8px;
+  }
+  .login-card h2 {
+    text-align: center;
+    font-size: 22px;
+    margin-bottom: 6px;
+    color: #1a3a5c;
+  }
+  .login-card .login-sub {
+    text-align: center;
+    font-size: 14px;
+    color: #7a9cc6;
+    margin-bottom: 24px;
+  }
+  .login-card input {
+    width: 100%;
+    border: 2px solid #e0e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 15px;
+    outline: none;
+    transition: border 0.2s;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+  }
+  .login-card input:focus { border-color: #2575fc; }
+  .login-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    background: #f0f4fa;
+    border-radius: 10px;
+    padding: 4px;
+  }
+  .login-toggle button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: #7a9cc6;
+    transition: all 0.2s;
+  }
+  .login-toggle button.active {
+    background: #2575fc;
+    color: #fff;
+  }
+  .login-btn {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    background: #2575fc;
+    color: #fff;
+    transition: all 0.2s;
+  }
+  .login-btn:active { transform: scale(0.98); }
+  .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .login-hint {
+    text-align: center;
+    font-size: 12px;
+    color: #b0c4de;
+    margin-top: 14px;
+  }
+
+  /* ===== User Bar in Header ===== */
+  .user-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 13px;
+  }
+  .user-bar .user-email { opacity: 0.9; }
+  .user-bar .logout-btn {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    border-radius: 8px;
+    padding: 3px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .user-bar .logout-btn:hover { background: rgba(255,255,255,0.3); }
 </style>
 </head>
 <body>
 
+<!-- ===== Login Overlay ===== -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <div class="login-icon">💧</div>
+    <h2>每日喝水打卡</h2>
+    <div class="login-sub">登录后即可同步数据到云端</div>
+    <div class="login-toggle">
+      <button class="active" id="toggleLogin" onclick="setAuthMode('login')">登录</button>
+      <button id="toggleRegister" onclick="setAuthMode('register')">注册</button>
+    </div>
+    <input type="email" id="authEmail" placeholder="邮箱地址" autocomplete="email" onkeydown="if(event.key==='Enter')document.getElementById('authPassword').focus()">
+    <input type="password" id="authPassword" placeholder="密码（至少6位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')handleAuth()">
+    <button class="login-btn" id="authBtn" onclick="handleAuth()">登录</button>
+    <div class="login-hint" id="authHint">还没有账号？点击「注册」创建一个</div>
+  </div>
+</div>
+
+<div id="appContainer">
+
 <div class="header">
   <h1>💧 每日喝水打卡</h1>
   <div class="date" id="todayDate"></div>
+  <div class="user-bar" id="userBar">
+    <span class="user-email" id="userEmail"></span>
+    <button class="logout-btn" onclick="doLogout()">退出登录</button>
+  </div>
   <div style="margin-top:4px; font-size:12px;" id="syncBadge"></div>
 </div>
 
@@ -645,6 +784,7 @@
   </div>
 
 </div>
+</div><!-- close appContainer -->
 
 <!-- ===== Toast ===== -->
 <div class="toast" id="toast"></div>
@@ -671,13 +811,161 @@
 const SUPABASE_URL = 'https://dmzqezdsxtrdnovptcsl.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_O1WxAOtdfn_2Rbhxs3WL9Q_pKgJGtxX';
 let cloudOK = false;
+let authMode = 'login';
+
+// ===== Auth Session =====
+function saveSession(session) {
+  // Calculate absolute expiry timestamp from expires_in (seconds)
+  if (session.expires_in && !session.expires_at) {
+    session.expires_at = Math.floor(Date.now() / 1000) + session.expires_in;
+  }
+  // Store refresh_token separately so it survives even if main session is cleared
+  if (session.refresh_token) {
+    localStorage.setItem('water_tracker_refresh_token', session.refresh_token);
+  }
+  localStorage.setItem('water_tracker_session', JSON.stringify(session));
+}
+function getSession() {
+  const raw = localStorage.getItem('water_tracker_session');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+function getAccessToken() {
+  const s = getSession();
+  return s ? s.access_token : null;
+}
+function getUserId() {
+  const s = getSession();
+  return s && s.user ? s.user.id : null;
+}
+function clearSession() {
+  localStorage.removeItem('water_tracker_session');
+  localStorage.removeItem('water_tracker_refresh_token');
+}
+
+// Token refresh — uses refresh_token to get a new access_token
+async function refreshSession() {
+  const refreshToken = localStorage.getItem('water_tracker_refresh_token');
+  if (!refreshToken) return false;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    if (!resp.ok) { console.warn('Token refresh failed:', resp.status); return false; }
+    const data = await resp.json();
+    saveSession(data);
+    console.log('Token refreshed successfully');
+    return true;
+  } catch(e) {
+    console.error('Token refresh error:', e);
+    return false;
+  }
+}
+
+// Check if token is expired or about to expire (within 5 minutes)
+function isTokenExpiring() {
+  const s = getSession();
+  if (!s || !s.expires_at) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return s.expires_at - now < 300; // less than 5 min left
+}
 
 function httpHeaders() {
+  const token = getAccessToken();
   return {
     'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Authorization': token ? `Bearer ${token}` : `Bearer ${SUPABASE_KEY}`,
     'Content-Type': 'application/json'
   };
+}
+
+// ===== Auth UI =====
+function setAuthMode(mode) {
+  authMode = mode;
+  document.getElementById('toggleLogin').classList.toggle('active', mode === 'login');
+  document.getElementById('toggleRegister').classList.toggle('active', mode === 'register');
+  document.getElementById('authBtn').textContent = mode === 'login' ? '登录' : '注册';
+  document.getElementById('authHint').textContent = mode === 'login'
+    ? '还没有账号？点击「注册」创建一个'
+    : '已有账号？点击「登录」';
+}
+
+async function handleAuth() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) { showToast('请输入邮箱和密码'); return; }
+  if (password.length < 6) { showToast('密码至少6位'); return; }
+
+  const btn = document.getElementById('authBtn');
+  const origText = btn.textContent;
+  btn.textContent = authMode === 'login' ? '登录中...' : '注册中...';
+  btn.disabled = true;
+
+  try {
+    if (authMode === 'register') {
+      const resp = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await resp.json();
+      if (!resp.ok) { showToast(data.error_description || data.msg || data.message || '注册失败'); return; }
+      if (data.access_token) {
+        saveSession(data);
+        showToast('注册成功！');
+        enterApp();
+      } else {
+        showToast('注册成功！请检查邮箱确认后登录');
+        setAuthMode('login');
+      }
+    } else {
+      const resp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await resp.json();
+      if (!resp.ok) { showToast(data.error_description || data.msg || data.message || '登录失败'); return; }
+      saveSession(data);
+      showToast('登录成功！');
+      enterApp();
+    }
+  } catch(e) {
+    showToast('网络错误，请重试');
+    console.error('Auth error:', e);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
+function doLogout() {
+  clearSession();
+  localStorage.removeItem(STORAGE_KEY);
+  document.getElementById('loginOverlay').classList.add('show');
+  document.getElementById('appContainer').style.display = 'none';
+  document.getElementById('authEmail').value = '';
+  document.getElementById('authPassword').value = '';
+  setSyncBadge('', '');
+}
+
+async function enterApp() {
+  document.getElementById('loginOverlay').classList.remove('show');
+  document.getElementById('appContainer').style.display = '';
+  const session = getSession();
+  if (session && session.user) {
+    document.getElementById('userEmail').textContent = '👤 ' + session.user.email;
+  }
+  setSyncBadge('☁️ 同步中...', '#7a9cc6');
+  const ok = await testCloud();
+  if (ok) {
+    await pullFromCloud();
+  } else {
+    setSyncBadge('⚠️ 离线', '#f5a623');
+  }
+  renderAll();
 }
 
 function makeUid(dk, t, ts) { return `${dk}-${t}-${ts}`; }
@@ -717,7 +1005,8 @@ async function pullFromCloud() {
 function pushToCloud(dateKey, type, time, ml) {
   if (!cloudOK) return;
   const uid = makeUid(dateKey, type, time);
-  const body = { uid, record_date: dateKey, type, ml: type === 'water' ? ml : null, recorded_at: time };
+  const userId = getUserId();
+  const body = { uid, record_date: dateKey, type, ml: type === 'water' ? ml : null, recorded_at: time, user_id: userId };
   fetch(`${SUPABASE_URL}/rest/v1/water_records`, {
     method: 'POST',
     headers: { ...httpHeaders(), 'Prefer': 'resolution=merge-duplicates' },
@@ -737,10 +1026,17 @@ function deleteFromCloud(dateKey, type, time) {
     .catch(e => console.error('Cloud delete error:', e));
 }
 
-// Test cloud connectivity on init
+// Test cloud connectivity on init — auto-refresh on 401
 async function testCloud() {
   try {
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?limit=1`, { headers: httpHeaders() });
+    let resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?limit=1`, { headers: httpHeaders() });
+    // If 401, try refreshing token and retry once
+    if (resp.status === 401) {
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        resp = await fetch(`${SUPABASE_URL}/rest/v1/water_records?limit=1`, { headers: httpHeaders() });
+      }
+    }
     cloudOK = resp.ok || resp.status === 200;
     if (cloudOK) console.log('Cloud sync: connected');
     else console.warn('Cloud sync: unavailable (status ' + resp.status + ')');
@@ -1414,16 +1710,33 @@ initYearView();
 document.getElementById('goalDisplay').textContent = getGoal();
 document.getElementById('legendGoal').textContent = `达标(≥${getGoal()}ml)`;
 
-// Pull from cloud first, then render
-(async function initCloud() {
-  setSyncBadge('☁️ 同步中...', '#7a9cc6');
-  const ok = await testCloud();
-  if (ok) {
-    await pullFromCloud();
+// Check auth state on page load — auto-refresh token to stay logged in
+(async function initAuth() {
+  const existingSession = getSession();
+  if (existingSession && existingSession.access_token) {
+    // Try to refresh token if it's expiring soon
+    if (isTokenExpiring()) {
+      const refreshed = await refreshSession();
+      if (!refreshed) {
+        // Refresh failed — token might be invalid, show login
+        clearSession();
+        document.getElementById('loginOverlay').classList.add('show');
+        document.getElementById('appContainer').style.display = 'none';
+        return;
+      }
+    }
+    enterApp();
+    // Set up auto-refresh timer: check every 10 minutes
+    setInterval(async () => {
+      if (isTokenExpiring()) {
+        const ok = await refreshSession();
+        if (!ok) console.warn('Auto token refresh failed');
+      }
+    }, 600000);
   } else {
-    setSyncBadge('⚠️ 离线', '#f5a623');
+    document.getElementById('loginOverlay').classList.add('show');
+    document.getElementById('appContainer').style.display = 'none';
   }
-  renderAll();
 })();
 
 // Close day detail on overlay click
